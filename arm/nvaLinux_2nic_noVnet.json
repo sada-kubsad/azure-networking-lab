@@ -10,10 +10,6 @@
             "defaultValue": "myVnet4",
             "type": "string"
         },
-        "storageAccountName": {
-            "defaultValue": "put here an unique name for your storage account",
-            "type": "string"
-        },
         "vmType": {
             "defaultValue": "ubuntu",
             "type": "string",
@@ -69,12 +65,12 @@
         "scriptUri": {
             "defaultValue": "[uri(deployment().properties.templateLink.uri, 'linuxNVAconfig.sh')]",
             "type": "string",
-            "metadata": { "description": "Script that will be executed" }            
+            "metadata": { "description": "Script that will be executed" }
         },
         "scriptCmd": {
             "defaultValue": "sh linuxNVAconfig.sh",
             "type": "string",
-            "metadata": { "description": "Command to run the script" }            
+            "metadata": { "description": "Command to run the script" }
         },
         "deployLBYesNo": {
             "defaultValue": "no",
@@ -88,6 +84,9 @@
         }
     },
     "variables": {
+        "deploymentApiVersion": "2022-09-01",
+        "computeApiVersion": "2023-03-01",
+        "vmExtensionApiVersion": "2023-07-01",
         "nicTemplatePipNsg": "[uri(deployment().properties.templateLink.uri, 'nic_NSG_noSLB_PIP_static.json')]",
         "nicTemplateNoPipNsg": "[uri(deployment().properties.templateLink.uri, 'nic_NSG_noSLB_noPIP_static.json')]",
         "nicTemplateNoPipNoNsg": "[uri(deployment().properties.templateLink.uri, 'nic_noNSG_noSLB_noPIP_static.json')]",
@@ -99,25 +98,24 @@
         },
         "settingsTable": {
             "ubuntu": {
-                "product": "UbuntuServer",
+                "product": "0001-com-ubuntu-server-jammy",
                 "publisher": "Canonical",
-                "sku": "16.04.0-LTS",
+                "sku": "22_04-lts-gen2",
                 "vmSize": "[parameters('vmSize')]"
             }
         },
         "settings": "[variables('settingsTable')[parameters('vmType')]]",
-        "avSetName": "[concat(parameters('vmName'),'AvSet')]",
         "slbName": "[concat(parameters('vmName'), '-slb')]",
         "slbBackendName": "[concat(parameters('vmName'), '-slbBackend')]",
         "slbPipName": "[concat(parameters('vmName'), '-slbPip')]",
         "ipPrefix": "10.4.2",
         "vipSuffix": "100",
         "slbSubnet": "[parameters('subnet0Name')]",
-		"deployLBTemplate": {
-			"yes": "[uri(deployment().properties.templateLink.uri, 'slb.json')]",
-			"no": "[uri(deployment().properties.templateLink.uri, 'nothing.json')]"
-		},
-		"LBTemplateURI": "[variables('deployLBTemplate')[parameters('deployLBYesNo')]]",
+        "deployLBTemplate": {
+            "yes": "[uri(deployment().properties.templateLink.uri, 'slb.json')]",
+            "no": "[uri(deployment().properties.templateLink.uri, 'nothing.json')]"
+        },
+        "LBTemplateURI": "[variables('deployLBTemplate')[parameters('deployLBYesNo')]]",
         "deployLBintParametersHash": {
             "yes": {
                 "externalInternal": {
@@ -203,54 +201,47 @@
         "deployLBextParameters": "[variables('deployLBextParametersHash')[parameters('deployLBYesNo')]]"
     },
     "resources": [
-		{
-			"comments": "Availability set for eventual NVA HA",
-			"type": "Microsoft.Compute/availabilitySets",
-			"name": "[variables('avSetName')]",
-			"apiVersion": "2016-03-30",
-			"location": "[resourceGroup().location]"
-		},
-		{
-			"comments": "Optionally, create an internal load balancer",
+        {
+            "comments": "Optionally, create an internal load balancer",
             "name": "nva-slb-int",
-			"type": "Microsoft.Resources/deployments",
-			"apiVersion": "2017-05-10",
-			"properties": {
-				"mode": "Incremental",
-				"templateLink": {
-					"uri": "[variables('LBTemplateUri')]",
-					"contentVersion": "1.0.0.0"
-				},
-				"parameters":  "[variables('deployLBintParameters')]"
-			}
-		},
-		{
-			"comments": "Optionally, create an external load balancer. Wait until the internal has been created, there seems to be some conflict when creating both at the same time",
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "[variables('deploymentApiVersion')]",
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "[variables('LBTemplateUri')]",
+                    "contentVersion": "1.0.0.0"
+                },
+                "parameters":  "[variables('deployLBintParameters')]"
+            }
+        },
+        {
+            "comments": "Optionally, create an external load balancer. Wait until the internal has been created, there seems to be some conflict when creating both at the same time",
             "name": "nva-slb-ext",
-			"type": "Microsoft.Resources/deployments",
-			"apiVersion": "2017-05-10",
-			"properties": {
-				"mode": "Incremental",
-				"templateLink": {
-					"uri": "[variables('LBTemplateUri')]",
-					"contentVersion": "1.0.0.0"
-				},
-				"parameters":  "[variables('deployLBextParameters')]"
-			},
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "[variables('deploymentApiVersion')]",
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "[variables('LBTemplateUri')]",
+                    "contentVersion": "1.0.0.0"
+                },
+                "parameters":  "[variables('deployLBextParameters')]"
+            },
             "dependsOn": [
                 "nva-slb-int"
             ]
-		},
+        },
         {
             "comments": "Deploy Linux VM as Virtual Network Appliance",
             "type": "Microsoft.Compute/virtualMachines",
             "name": "[concat(parameters('vmName'), '-', copyIndex(1))]",
-            "apiVersion": "2015-06-15",
+            "apiVersion": "[variables('computeApiVersion')]",
             "location": "[resourceGroup().location]",
+            "zones": [
+                "[add(mod(copyIndex(1), 3),1)]"
+            ],
             "properties": {
-				"availabilitySet": {
-					"id": "[resourceId('Microsoft.Compute/availabilitySets', variables('avSetName'))]"
-				},
                 "hardwareProfile": {
                     "vmSize": "[variables('settings')['vmSize']]"
                 },
@@ -262,12 +253,9 @@
                         "version": "latest"
                     },
                     "osDisk": {
-                        "name": "[concat(parameters('vmName'), '-', copyIndex(1),'-disk')]",
+                        "osType": "Linux",
                         "createOption": "FromImage",
-                        "vhd": {
-                            "uri": "[concat('http', '://', parameters('storageAccountName'), '.blob.core.windows.net', concat('/vhds/', parameters('vmName'), '-', copyIndex(1),'-disk.vhd'))]"
-                        },
-                        "caching": "ReadWrite"
+                        "diskSizeGB": 31
                     },
                     "dataDisks": []
                 },
@@ -307,18 +295,18 @@
                 "[concat(parameters('vmName'), '-nic1')]"
             ]
         },
-		{
+        {
             "comments": "Create eth0 with or without PIP, depending on the template",
-			"name": "[concat(parameters('vmName'), '-', copyIndex(1), '-nic0')]",
-			"type": "Microsoft.Resources/deployments",
-			"apiVersion": "2016-06-01",
-			"properties": {
-				"mode": "Incremental",
-				"templateLink": {
-					"uri": "[variables('nic0Template')]",
-					"contentVersion": "1.0.0.0"
-				},
-				"parameters":  {
+            "name": "[concat(parameters('vmName'), '-', copyIndex(1), '-nic0')]",
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "[variables('deploymentApiVersion')]",
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "[variables('nic0Template')]",
+                    "contentVersion": "1.0.0.0"
+                },
+                "parameters":  {
                     "nicName": {"value": "[concat(parameters('vmName'), '-', copyIndex(1), '-nic0')]"},
                     "ipAddress": { "value": "[concat(parameters('ip0'), copyIndex(1))]" },                    
                     "vnetName": { "value": "[parameters('vnetName')]" },
@@ -334,20 +322,20 @@
                 "count": "[parameters('vmCount')]"
             }
         },
-		{
-			"comments": "Create eth1",
+        {
+            "comments": "Create eth1",
             "name": "[concat(parameters('vmName'), '-', copyIndex(1), '-nic1')]",
-			"type": "Microsoft.Resources/deployments",
-			"apiVersion": "2016-06-01",
-			"properties": {
-				"mode": "Incremental",
-				"templateLink": {
-					"uri": "[variables('nic1Template')]",
-					"contentVersion": "1.0.0.0"
-				},
-				"parameters":  {
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "[variables('deploymentApiVersion')]",
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "[variables('nic1Template')]",
+                    "contentVersion": "1.0.0.0"
+                },
+                "parameters":  {
                     "nicName": {"value": "[concat(parameters('vmName'), '-', copyIndex(1), '-nic1')]"},
-                    "ipAddress": { "value": "[concat(parameters('ip1'), copyIndex(1))]" },                    
+                    "ipAddress": { "value": "[concat(parameters('ip1'), copyIndex(1))]" },
                     "vnetName": { "value": "[parameters('vnetName')]" },
                     "subnetName": { "value": "[parameters('subnet1Name')]"}
                 }
@@ -363,7 +351,7 @@
         {
             "type": "Microsoft.Compute/virtualMachines/extensions",
             "name": "[concat(parameters('vmName'), '-', copyIndex(1), '/installcustomscript')]",
-            "apiVersion": "2015-05-01-preview",
+            "apiVersion": "[variables('vmExtensionApiVersion')]",
             "location": "[resourceGroup().location]",
             "properties": {
                 "publisher": "Microsoft.Azure.Extensions",

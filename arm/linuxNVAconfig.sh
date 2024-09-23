@@ -24,16 +24,18 @@ sudo systemctl restart apache2
 # Delete default web site and download a new one
 sudo rm /var/www/html/index.html
 sudo apt-get install wget -you
-sudo wget https://raw.githubusercontent.com/erjosito/azure-networking-lab/master/index.php -P /var/www/html/
+sudo wget https://raw.githubusercontent.com/erjosito/azure-networking-lab/master/arm/index.php -P /var/www/html/
 
 #############
 #  Routing  #
 #############
 
 # Set up a better routing metric on eth1 (external, 10.4.3.0/24)
-sudo apt-get install ifmetric -y
+# Note that this is not persistent, so you will have to rerun it if you reboot the VM
+sudo apt-get install -y ifmetric
 sudo ifmetric eth0 100
-sudo ifmetric eth1 10
+# sudo ifmetric eth1 10  # This breaks the ILB!!!!
+sudo ifmetric eth1 200
 
 # configure static routes for the vnet space to eth0
 sudo route add -net 10.0.0.0/13 gw 10.4.2.1 dev eth0
